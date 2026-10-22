@@ -1,0 +1,24 @@
+# Alternative to Vercel Cron for a punctual 07:00 BRT briefing.
+# Setup: repo Settings → Secrets → Actions: APP_URL (https://seu-app.vercel.app) and CRON_SECRET.
+# Opt-in: also create the repository *variable* BRIEFING_VIA_ACTIONS=true (Settings → Variables),
+# otherwise the scheduled run is skipped. If you use this, remove "crons" from vercel.json
+# to avoid two briefings a day.
+# Note: GitHub's scheduler can also be a few minutes late under load.
+name: Morning briefing
+
+on:
+  schedule:
+    - cron: "0 10 * * *" # 10:00 UTC = 07:00 America/Sao_Paulo
+  workflow_dispatch:
+
+jobs:
+  briefing:
+    if: vars.BRIEFING_VIA_ACTIONS == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Trigger briefing
+        run: |
+          curl --fail-with-body --silent --show-error --max-time 90 \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.APP_URL }}/api/cron/briefing"
