@@ -1,6 +1,6 @@
 /**
  * Usage: pnpm ai:try "gastei 40 no mercado" "uber 23,50" ...
- * Runs the real classifier (calls Claude, does NOT save) — handy for tuning the prompt.
+ * Runs the real classifier (calls the configured AI, does NOT save) — handy for tuning the prompt.
  */
 import { classify } from "../src/ai/classify";
 

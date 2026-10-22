@@ -26,7 +26,10 @@ Preencha no `.env`:
 | `TELEGRAM_WEBHOOK_SECRET` | `openssl rand -hex 32` (só `A-Z a-z 0-9 _ -`, 16+ caracteres) |
 | `ALLOWED_CHAT_ID` | seu chat id (veja abaixo) |
 | `DATABASE_URL` | Neon → *Connection string* (use a do **pooler**, com `-pooler` no host e `sslmode=require`) |
-| `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) → API Keys |
+| `GEMINI_API_KEY` | IA padrão, grátis: [aistudio.google.com](https://aistudio.google.com) → **Get API key** |
+| `GEMINI_MODEL` | modelo do Gemini (padrão `gemini-2.5-flash`) |
+| `ANTHROPIC_API_KEY` | opcional: usa Claude (`claude-haiku-5-5`) no lugar do Gemini |
+| `AI_PROVIDER` | opcional: força `gemini` ou `anthropic`; sem ela, usa Gemini se houver `GEMINI_API_KEY` |
 | `TZ_USER` | fuso para datas (padrão `America/Sao_Paulo`) |
 | `CRON_SECRET` | `openssl rand -hex 32`; protege as rotas do briefing |
 | `WEATHER_LAT` / `WEATHER_LON` | coordenadas do clima (padrão: Ilha do Governador) |
@@ -70,7 +73,14 @@ Convenções:
 
 ## Captura com IA
 
-Toda mensagem de texto que não é comando vai para o classificador (`claude-haiku-5-5`, saída estruturada em JSON):
+Toda mensagem de texto que não é comando vai para o classificador. A IA é o **Gemini** (padrão, plano grátis)
+ou o **Claude**, escolhida pelas variáveis de ambiente. Os dois devolvem JSON com schema, e o código valida
+tudo com Zod do mesmo jeito; a camada fica em `src/ai/llm.ts`.
+
+> **Privacidade:** no plano grátis do Gemini, o Google pode usar o conteúdo enviado para melhorar os produtos dele.
+> Se não quiser isso para seus gastos e anotações, use o plano pago do Gemini ou o Claude.
+
+Fluxo:
 
 1. **A IA classifica.** Ela devolve tipo, valor **como escrito** ("23,50", "150 conto"), categoria, tags, data, dados de abastecimento, resumo e confiança.
    O prompt fica em `src/ai/prompts/classify.ts`.
@@ -118,7 +128,7 @@ A IA nunca gera SQL, e a frase da resposta é montada pelo código a partir do f
 Todo dia às 07:00 (BRT) o bot manda:
 
 1. **Texto (HTML):** clima (Open-Meteo), 3 manchetes de Brasil e mundo (g1 + BBC News Brasil) e até 3 de esportes (ge).
-   As manchetes são escolhidas e reescritas pelo Claude, sem sensacionalismo e sem repetir assunto.
+   As manchetes são escolhidas e reescritas pela IA, sem sensacionalismo e sem repetir assunto.
    Se o Flamengo jogou ontem, entra uma seção com o placar dele.
    Se a mensagem passar de ~3500 caracteres, vira duas, sem cortar conteúdo.
 2. **Imagem dos resultados de ontem (PNG 1080px, fundo escuro):** primeiro o bloco dos `FAVORITE_TEAMS`, depois um bloco por liga, nesta ordem:
@@ -133,7 +143,7 @@ Só entram jogos finalizados. Cada fonte falha de forma independente:
 |---|---|
 | Clima | linha "clima indisponível" |
 | Feeds RSS | "⚠️ notícias indisponíveis" |
-| Claude (seleção de notícias) | primeiras manchetes como vieram |
+| IA (seleção de notícias) | primeiras manchetes como vieram |
 | Imagem (render ou envio) | placares em texto + "⚠️ imagem indisponível" |
 | ESPN | "⚠️ placares indisponíveis" |
 
@@ -152,7 +162,7 @@ Alternativas de agendamento (use **só uma**, ou chegam dois briefings):
 - **Vercel Cron:** se hospedar na Vercel, o `vercel.json` já agenda `0 10 * * *`. No plano Hobby ele pode disparar
   a qualquer momento entre 07:00 e 07:59.
 
-**Checando as fontes reais** (sem Claude e sem Telegram; renderiza `briefing-check.png`):
+**Checando as fontes reais** (sem IA e sem Telegram; renderiza `briefing-check.png`):
 
 ```bash
 pnpm briefing:check              # ontem
@@ -188,7 +198,7 @@ O `render.yaml` cria o serviço `jarvis-bot` (plano Free, região Virginia) e pe
 | `TELEGRAM_BOT_TOKEN` | token do @BotFather |
 | `ALLOWED_CHAT_ID` | seu chat id (@userinfobot) |
 | `DATABASE_URL` | string do Neon |
-| `ANTHROPIC_API_KEY` | chave da Anthropic |
+| `GEMINI_API_KEY` | chave grátis do [Google AI Studio](https://aistudio.google.com) |
 
 `TELEGRAM_WEBHOOK_SECRET` e `CRON_SECRET` são gerados pelo Render; clima, fuso e time favorito já vêm preenchidos.
 
@@ -235,7 +245,7 @@ src/
   app/api/cron/briefing/      cron do briefing
   app/api/briefing/scores-image/  PNG de resultados (debug)
   briefing/                   fontes (clima, RSS, ESPN), ordenação, mensagem, imagem, orquestração
-  ai/                         cliente Anthropic, classificador, parser de perguntas, seleção de notícias, prompts/
+  ai/                         camada de IA (Gemini/Claude), classificador, parser de perguntas, seleção de notícias, prompts/
   telegram/                   bot, handlers, captura, consultas, formatação, filtro de chat, textos
   db/                         schema Drizzle, cliente Neon, gravação e consultas
   lib/                        env (Zod), logger, secrets, dinheiro, datas, períodos, km/l, HTML

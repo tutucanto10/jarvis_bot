@@ -1,8 +1,6 @@
-import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import type { Headline } from "@/briefing/news";
-import { logger } from "@/lib/logger";
-import { AI_MODEL, getAnthropic } from "./client";
+import { getLlm } from "./llm";
 import { buildNewsUserMessage, NEWS_SYSTEM_PROMPT } from "./prompts/news";
 
 const PickSchema = z.object({ index: z.number(), line: z.string() });
@@ -50,29 +48,21 @@ export const selectNews: NewsSelector = async (sections) => {
   const esportes = sections.esportes.slice(0, MAX_INPUT_PER_SECTION);
   if (brasilMundo.length === 0 && esportes.length === 0) return { brasilMundo: [], esportes: [] };
 
-  const response = await getAnthropic().messages.parse({
-    model: AI_MODEL,
-    max_tokens: 4096,
-    output_config: { effort: "low", format: zodOutputFormat(RawNewsSchema) },
+  const result = await getLlm().generateJson({
+    task: "news",
     system: NEWS_SYSTEM_PROMPT,
-    messages: [
-      {
-        role: "user",
-        content: buildNewsUserMessage({
-          brasilMundo: brasilMundo.map((h) => h.title),
-          esportes: esportes.map((h) => h.title),
-        }),
-      },
-    ],
+    user: buildNewsUserMessage({
+      brasilMundo: brasilMundo.map((h) => h.title),
+      esportes: esportes.map((h) => h.title),
+    }),
+    schema: RawNewsSchema,
+    maxTokens: 4096,
   });
-  logger.info("news selected", { stopReason: response.stop_reason, outputTokens: response.usage.output_tokens });
-
-  const parsed = RawNewsSchema.safeParse(response.parsed_output);
-  if (response.stop_reason !== "end_turn" || !parsed.success) throw new Error("invalid news selection");
+  if (!result.ok) throw new Error(`invalid news selection: ${result.reason}`);
 
   const selection = {
-    brasilMundo: validatePicks(parsed.data.brasil_mundo, brasilMundo.length),
-    esportes: validatePicks(parsed.data.esportes, esportes.length),
+    brasilMundo: validatePicks(result.data.brasil_mundo, brasilMundo.length),
+    esportes: validatePicks(result.data.esportes, esportes.length),
   };
   // A section the model emptied out falls back to raw headlines rather than disappearing.
   const fallback = firstHeadlines({ brasilMundo, esportes });

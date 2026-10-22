@@ -10,3 +10,28 @@ describe("getTelegramEnv", () => {
     vi.unstubAllEnvs();
   });
 });
+
+describe("getAiEnv", () => {
+  const load = async (env: Record<string, string>) => {
+    vi.resetModules();
+    for (const key of ["AI_PROVIDER", "GEMINI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_MODEL"]) vi.stubEnv(key, undefined as never);
+    for (const [k, v] of Object.entries(env)) vi.stubEnv(k, v);
+    const { getAiEnv } = await import("./env");
+    try {
+      return getAiEnv();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  };
+
+  it("prefers Gemini when its key is set", async () => {
+    expect(await load({ GEMINI_API_KEY: "g", ANTHROPIC_API_KEY: "a" })).toMatchObject({ AI_PROVIDER: "gemini", GEMINI_MODEL: "gemini-2.5-flash" });
+    expect(await load({ ANTHROPIC_API_KEY: "a" })).toMatchObject({ AI_PROVIDER: "anthropic" });
+    expect(await load({ GEMINI_API_KEY: "g", ANTHROPIC_API_KEY: "a", AI_PROVIDER: "anthropic" })).toMatchObject({ AI_PROVIDER: "anthropic" });
+  });
+
+  it("fails clearly when the selected provider has no key", async () => {
+    await expect(load({})).rejects.toThrow(/GEMINI_API_KEY/);
+    await expect(load({ AI_PROVIDER: "gemini", ANTHROPIC_API_KEY: "a" })).rejects.toThrow(/GEMINI_API_KEY/);
+  });
+});

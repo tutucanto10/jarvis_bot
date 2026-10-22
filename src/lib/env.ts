@@ -19,9 +19,21 @@ const dbSchema = z.object({
 
 export type DbEnv = z.infer<typeof dbSchema>;
 
-const aiSchema = z.object({
-  ANTHROPIC_API_KEY: z.string().min(1),
-});
+const aiSchema = z
+  .object({
+    AI_PROVIDER: z.enum(["gemini", "anthropic"]).optional(),
+    GEMINI_API_KEY: z.string().min(1).optional(),
+    GEMINI_MODEL: z.string().min(1).default("gemini-2.5-flash"),
+    ANTHROPIC_API_KEY: z.string().min(1).optional(),
+  })
+  .transform((env) => ({
+    ...env,
+    // Explicit AI_PROVIDER wins; otherwise Gemini if its key is set, else Claude.
+    AI_PROVIDER: env.AI_PROVIDER ?? (env.GEMINI_API_KEY ? "gemini" : "anthropic"),
+  }))
+  .refine((env) => (env.AI_PROVIDER === "gemini" ? !!env.GEMINI_API_KEY : !!env.ANTHROPIC_API_KEY), {
+    message: "set GEMINI_API_KEY (or ANTHROPIC_API_KEY) for the selected AI_PROVIDER",
+  });
 
 export type AiEnv = z.infer<typeof aiSchema>;
 

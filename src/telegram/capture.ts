@@ -1,6 +1,5 @@
 import { InlineKeyboard, type Context } from "grammy";
 import { normalizeTags, type Classification } from "@/ai/classify";
-import { AI_MODEL } from "@/ai/client";
 import { createEntry, deleteEntry, deleteLastEntry, type CreateEntryInput } from "@/db/entries";
 import type { EntryType } from "@/db/schema";
 import { logger } from "@/lib/logger";
@@ -27,7 +26,7 @@ const typeKeyboard = () =>
 
 const undoKeyboard = (id: number) => new InlineKeyboard().text(texts.buttons.undo, callbackData.undo(id));
 
-export function toCreateInput(rawText: string, c: Classification): CreateEntryInput {
+export function toCreateInput(rawText: string, c: Classification, model?: string): CreateEntryInput {
   return {
     type: c.type,
     rawText,
@@ -35,7 +34,7 @@ export function toCreateInput(rawText: string, c: Classification): CreateEntryIn
     category: c.category ?? null,
     tags: c.tags,
     dueDate: c.due_date ?? null,
-    payload: { summary: c.summary, confidence: c.confidence, model: AI_MODEL },
+    payload: { summary: c.summary, confidence: c.confidence, ...(model && { model }) },
     fuel: c.fuel && {
       totalCents: c.fuel.total_cents,
       liters: c.fuel.liters ?? null,
@@ -62,7 +61,7 @@ export async function handleCapture(ctx: Context, deps: BotDeps, text: string): 
       return;
     }
 
-    const saved = await createEntry(deps.getDb(), toCreateInput(text, outcome.classification));
+    const saved = await createEntry(deps.getDb(), toCreateInput(text, outcome.classification, outcome.model));
     logger.info("entry saved", { id: saved.entry.id, type: saved.entry.type });
     await ctx.reply(texts.saved(describeEntry(saved)), { reply_markup: undoKeyboard(saved.entry.id) });
   } catch (err) {

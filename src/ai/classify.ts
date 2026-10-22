@@ -1,11 +1,9 @@
-import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import { ENTRY_TYPES, type EntryType } from "@/db/schema";
 import { ASTRO_PATTERN, SPENDING_CATEGORIES, type SpendingCategory } from "@/lib/categories";
 import { formatWeekday, isIsoDate, toLocalDate } from "@/lib/dates";
-import { logger } from "@/lib/logger";
 import { parseBRL } from "@/lib/money";
-import { AI_MODEL, getAnthropic } from "./client";
+import { getLlm } from "./llm";
 import { buildClassifyUserMessage, CLASSIFY_SYSTEM_PROMPT } from "./prompts/classify";
 
 export const MIN_CONFIDENCE = 0.7;
@@ -51,7 +49,7 @@ export const ClassificationSchema = z.object({
 export type Classification = z.infer<typeof ClassificationSchema>;
 
 export type ClassifyOutcome =
-  | { status: "ok"; classification: Classification }
+  | { status: "ok"; classification: Classification; model?: string }
   | { status: "unsure"; reason: string; classification?: Classification };
 
 export interface ClassifyOptions {
@@ -116,52 +114,31 @@ export function normalizeTags(tags: string[], rawText: string): string[] {
   return [...new Set(cleaned)].slice(0, 10);
 }
 
-/** Calls Claude and validates the answer. Throws only on API/network errors. */
+/** Asks the configured LLM and validates the answer. Throws only on API/network errors. */
 export const classify: Classifier = async (text, options = {}) => {
   const now = options.now ?? new Date();
   const timeZone = options.timeZone ?? "America/Sao_Paulo";
-  const startedAt = Date.now();
+  const llm = getLlm();
 
-  const response = await getAnthropic().messages.parse({
-    model: AI_MODEL,
-    // Room for adaptive thinking (on by default on this model) plus the JSON.
-    max_tokens: 2048,
-    output_config: { effort: "low", format: zodOutputFormat(RawClassificationSchema) },
-    system: [{ type: "text", text: CLASSIFY_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
-    messages: [
-      {
-        role: "user",
-        content: buildClassifyUserMessage({
-          text,
-          today: toLocalDate(now, timeZone),
-          weekday: formatWeekday(now, timeZone),
-          forcedType: options.forcedType,
-        }),
-      },
-    ],
+  const result = await llm.generateJson({
+    task: "classify",
+    system: CLASSIFY_SYSTEM_PROMPT,
+    user: buildClassifyUserMessage({
+      text,
+      today: toLocalDate(now, timeZone),
+      weekday: formatWeekday(now, timeZone),
+      forcedType: options.forcedType,
+    }),
+    schema: RawClassificationSchema,
   });
+  if (!result.ok) return { status: "unsure", reason: result.reason };
 
-  logger.info("classified", {
-    stopReason: response.stop_reason,
-    ms: Date.now() - startedAt,
-    inputTokens: response.usage.input_tokens,
-    outputTokens: response.usage.output_tokens,
-  });
-
-  if (response.stop_reason !== "end_turn" || !response.parsed_output) {
-    return { status: "unsure", reason: `stop_reason=${response.stop_reason}` };
-  }
-
-  // Validate again with our own schema: never trust the helper's output blindly.
-  const raw = RawClassificationSchema.safeParse(response.parsed_output);
-  if (!raw.success) return { status: "unsure", reason: "invalid model output" };
-
-  const normalized = normalizeClassification(raw.data, text, options.forcedType);
+  const normalized = normalizeClassification(result.data, text, options.forcedType);
   if (!normalized.ok) return { status: "unsure", reason: normalized.error };
 
   const classification = normalized.value;
   if (!options.forcedType && classification.confidence < MIN_CONFIDENCE) {
     return { status: "unsure", reason: "low confidence", classification };
   }
-  return { status: "ok", classification };
+  return { status: "ok", classification, model: llm.model };
 };

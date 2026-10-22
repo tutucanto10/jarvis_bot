@@ -1,10 +1,8 @@
-import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import type { EntryFilter } from "@/db/queries";
 import { ENTRY_TYPES } from "@/db/schema";
 import { SPENDING_CATEGORIES } from "@/lib/categories";
 import { formatWeekday, isIsoDate, toLocalDate } from "@/lib/dates";
-import { logger } from "@/lib/logger";
 import {
   customRange,
   lastMonthRange,
@@ -17,7 +15,7 @@ import {
   yesterdayRange,
   type DateRange,
 } from "@/lib/periods";
-import { AI_MODEL, getAnthropic } from "./client";
+import { getLlm } from "./llm";
 import { buildQueryUserMessage, QUERY_SYSTEM_PROMPT } from "./prompts/query";
 
 export const PERIOD_PRESETS = [
@@ -124,32 +122,15 @@ function resolvePeriod(p: RawQuery["period"], now: Date, tz: string): DateRange 
 
 /** Natural language → validated filter. The model never writes SQL. */
 export const parseQuery: QueryParser = async (text, { now, timeZone }) => {
-  const response = await getAnthropic().messages.parse({
-    model: AI_MODEL,
-    max_tokens: 2048,
-    output_config: { effort: "low", format: zodOutputFormat(RawQuerySchema) },
-    system: [{ type: "text", text: QUERY_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
-    messages: [
-      {
-        role: "user",
-        content: buildQueryUserMessage({
-          text,
-          today: toLocalDate(now, timeZone),
-          weekday: formatWeekday(now, timeZone),
-        }),
-      },
-    ],
+  const result = await getLlm().generateJson({
+    task: "query",
+    system: QUERY_SYSTEM_PROMPT,
+    user: buildQueryUserMessage({ text, today: toLocalDate(now, timeZone), weekday: formatWeekday(now, timeZone) }),
+    schema: RawQuerySchema,
   });
+  if (!result.ok) return { status: "unsure", reason: result.reason };
 
-  logger.info("query parsed", { stopReason: response.stop_reason, outputTokens: response.usage.output_tokens });
-
-  if (response.stop_reason !== "end_turn" || !response.parsed_output) {
-    return { status: "unsure", reason: `stop_reason=${response.stop_reason}` };
-  }
-  const raw = RawQuerySchema.safeParse(response.parsed_output);
-  if (!raw.success) return { status: "unsure", reason: "invalid model output" };
-
-  const query = toStructuredQuery(raw.data, now, timeZone);
+  const query = toStructuredQuery(result.data, now, timeZone);
   return query.ok ? { status: "ok", query: query.value } : { status: "unsure", reason: query.error };
 };
 

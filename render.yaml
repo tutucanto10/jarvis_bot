@@ -23,8 +23,12 @@ services:
         sync: false
       - key: DATABASE_URL
         sync: false
-      - key: ANTHROPIC_API_KEY
+      # Free key at aistudio.google.com. To use Claude instead, add ANTHROPIC_API_KEY
+      # and set AI_PROVIDER=anthropic (or just leave GEMINI_API_KEY unset).
+      - key: GEMINI_API_KEY
         sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
       - key: CRON_SECRET
         generateValue: true
       - key: TZ_USER
