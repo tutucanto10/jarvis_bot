@@ -2,9 +2,12 @@ import { z } from "zod";
 
 const telegramSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().regex(/^\d+:[\w-]+$/, "invalid bot token format"),
+  // Telegram only accepts A-Z a-z 0-9 _ - here; generated secrets (e.g. Render's base64) are
+  // stripped of other characters. Route and setWebhook both read this same value, so they match.
   TELEGRAM_WEBHOOK_SECRET: z
     .string()
-    .regex(/^[\w-]{16,256}$/, "use 16-256 chars of A-Z, a-z, 0-9, _ or -"),
+    .transform((s) => s.replace(/[^\w-]/g, "").slice(0, 256))
+    .refine((s) => s.length >= 16, "use at least 16 chars of A-Z, a-z, 0-9, _ or -"),
   ALLOWED_CHAT_ID: z.coerce.number().int(),
 });
 

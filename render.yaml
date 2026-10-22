@@ -1,0 +1,39 @@
+# Render Blueprint: Dashboard → New → Blueprint → pick this repo.
+# Variables marked `sync: false` are asked for in the dashboard (never committed).
+services:
+  - type: web
+    name: jarvis-bot
+    runtime: node
+    plan: free
+    # Same AWS region as a Neon project in US East (N. Virginia).
+    region: virginia
+    # Migrations run on every deploy (DATABASE_URL is available at build time).
+    buildCommand: npx --yes pnpm@10.28.0 install --frozen-lockfile && npm run build:render
+    # Registers the Telegram webhook at RENDER_EXTERNAL_URL, then starts the server.
+    startCommand: npm run start:render
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        generateValue: true
+      - key: ALLOWED_CHAT_ID
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: CRON_SECRET
+        generateValue: true
+      - key: TZ_USER
+        value: America/Sao_Paulo
+      - key: WEATHER_LAT
+        value: "-22.80"
+      - key: WEATHER_LON
+        value: "-43.20"
+      - key: WEATHER_LABEL
+        value: Ilha do Governador
+      - key: FAVORITE_TEAMS
+        value: Flamengo

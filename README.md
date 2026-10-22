@@ -1,7 +1,7 @@
 # Segundo cérebro — bot pessoal no Telegram
 
 Bot de uso pessoal: captura gastos, abastecimentos, ideias e tarefas em texto livre e manda um briefing matinal.
-Next.js (App Router, só API routes) na Vercel + grammY em modo webhook.
+Next.js (App Router, só API routes) + grammY em modo webhook. Deploy recomendado: **Render (free) + Neon + cron-job.org**.
 
 > Status: **Fase 5** — briefing matinal.
 
@@ -32,7 +32,7 @@ Preencha no `.env`:
 | `WEATHER_LAT` / `WEATHER_LON` | coordenadas do clima (padrão: Ilha do Governador) |
 | `WEATHER_LABEL` | nome exibido no clima (padrão `Ilha do Governador`) |
 | `FAVORITE_TEAMS` | times em destaque, separados por vírgula (padrão `Flamengo`) |
-| `APP_URL` | URL do deploy na Vercel (opcional, usada por `pnpm webhook:set`) |
+| `APP_URL` | URL pública do app (opcional; no Render o script usa `RENDER_EXTERNAL_URL` automaticamente) |
 
 **Descobrindo seu chat id:** mande qualquer mensagem pro bot e abra
 `https://api.telegram.org/bot<TOKEN>/getUpdates` (com o webhook desligado). O valor está em `message.chat.id`.
@@ -140,20 +140,17 @@ Só entram jogos finalizados. Cada fonte falha de forma independente:
 Cada envio fica registrado na tabela `briefings`.
 
 **Disparo:**
-- **Vercel Cron:** `vercel.json` agenda `GET /api/cron/briefing` para `0 10 * * *` (10:00 UTC = 07:00 BRT).
-  A Vercel envia `Authorization: Bearer $CRON_SECRET` automaticamente quando a variável existe no projeto.
+- **Agendado:** um job no [cron-job.org](https://cron-job.org) chama `GET /api/cron/briefing` às 07:00 `America/Sao_Paulo`
+  com o header `Authorization: Bearer <CRON_SECRET>` (veja *Deploy*).
 - **Manual:** comando `/briefing` no bot.
 - **Debug da imagem:** `GET /api/briefing/scores-image?date=YYYY-MM-DD&page=1&secret=$CRON_SECRET`
   (ou com o header `Authorization: Bearer`).
 
-> ⚠️ **Plano Hobby da Vercel:** o cron roda uma vez por dia, mas pode disparar **a qualquer momento dentro da hora**
-> (entre 07:00 e 07:59 BRT). Para horário pontual, use uma alternativa e **remova `crons` do `vercel.json`**
-> para não receber dois briefings:
->
-> - **GitHub Actions:** já incluso em `.github/workflows/briefing.yml`. Cadastre os secrets `APP_URL` e `CRON_SECRET` e a variável `BRIEFING_VIA_ACTIONS=true` no repositório. Sem a variável, o agendamento não roda.
->   O agendador do GitHub também pode atrasar alguns minutos em horários de pico.
-> - **cron-job.org:** crie um job para `https://seu-app.vercel.app/api/cron/briefing`, às 07:00 `America/Sao_Paulo`,
->   com o header `Authorization: Bearer <CRON_SECRET>`.
+Alternativas de agendamento (use **só uma**, ou chegam dois briefings):
+- **GitHub Actions:** `.github/workflows/briefing.yml`. Cadastre os secrets `APP_URL` e `CRON_SECRET` e a variável
+  `BRIEFING_VIA_ACTIONS=true` no repositório; sem a variável, o agendamento não roda.
+- **Vercel Cron:** se hospedar na Vercel, o `vercel.json` já agenda `0 10 * * *`. No plano Hobby ele pode disparar
+  a qualquer momento entre 07:00 e 07:59.
 
 **Checando as fontes reais** (sem Claude e sem Telegram; renderiza `briefing-check.png`):
 
@@ -177,17 +174,48 @@ pnpm typecheck
 > `dev:polling` apaga o webhook, porque o Telegram não entrega updates por polling com webhook ativo.
 > Quando terminar, rode `pnpm webhook:set` de novo pra produção voltar a funcionar.
 
-## Deploy (Vercel)
+## Deploy (Render + Neon + cron-job.org, tudo grátis)
 
-1. Importe o repositório na Vercel.
-2. Em *Settings → Environment Variables*, cadastre todas as variáveis do `.env.example` (menos `APP_URL`).
-   Rode `pnpm db:migrate` apontando pro banco de produção antes do deploy.
-3. Faça o deploy.
-4. Aponte o webhook (também registra a lista de comandos no Telegram):
+**1. Banco (Neon).** Crie um projeto em [neon.tech](https://neon.tech) na região **AWS US East (N. Virginia)**
+e copie a connection string com *Connection pooling* ligado (`postgresql://...-pooler...?sslmode=require`).
+Não precisa criar tabelas: as migrations rodam sozinhas a cada deploy.
 
-```bash
-pnpm webhook:set https://seu-app.vercel.app
-```
+**2. App (Render).** Em [render.com](https://render.com): **New → Blueprint** → escolha este repositório.
+O `render.yaml` cria o serviço `jarvis-bot` (plano Free, região Virginia) e pede as variáveis secretas:
+
+| Variável | Valor |
+|---|---|
+| `TELEGRAM_BOT_TOKEN` | token do @BotFather |
+| `ALLOWED_CHAT_ID` | seu chat id (@userinfobot) |
+| `DATABASE_URL` | string do Neon |
+| `ANTHROPIC_API_KEY` | chave da Anthropic |
+
+`TELEGRAM_WEBHOOK_SECRET` e `CRON_SECRET` são gerados pelo Render; clima, fuso e time favorito já vêm preenchidos.
+
+A cada deploy, o Render:
+1. instala as dependências, **aplica as migrations** e faz o build (`npm run build:render`);
+2. **registra o webhook** do Telegram em `RENDER_EXTERNAL_URL/api/telegram`, com a lista de comandos, e sobe o servidor
+   (`npm run start:render`). Se o registro falhar, o servidor sobe mesmo assim e o erro aparece nos logs.
+
+**3. Agendamentos (cron-job.org).** Crie dois jobs:
+
+| Job | URL | Quando | Header |
+|---|---|---|---|
+| Manter acordado | `https://<app>.onrender.com/api/health` | a cada 10 minutos | — |
+| Briefing | `https://<app>.onrender.com/api/cron/briefing` | todo dia 07:00, fuso `America/Sao_Paulo` | `Authorization: Bearer <CRON_SECRET>` |
+
+O `CRON_SECRET` fica em *Render → jarvis-bot → Environment*.
+
+> **Por que manter acordado:** no plano Free, o Render desliga o serviço após 15 min sem acesso, e ele leva
+> ~1 min para voltar. Sem o ping, a primeira mensagem depois de um tempo parado demora, e o Telegram pode
+> reenviá-la e duplicar o registro. Um serviço ligado o mês inteiro usa ~744 h, dentro das 750 h grátis do Render,
+> desde que seja o único serviço Free da conta.
+
+**4. Teste.** Mande "gastei 40 no mercado" para o bot. Se não responder, veja os logs no Render ou abra
+`https://api.telegram.org/bot<TOKEN>/getWebhookInfo` e confira o `last_error_message`.
+
+Para hospedar em outro lugar (Vercel, VPS…): rode `pnpm db:migrate`, faça o deploy e depois
+`pnpm webhook:set https://<sua-url>`.
 
 ## Segurança
 
@@ -203,6 +231,7 @@ pnpm webhook:set https://seu-app.vercel.app
 ```
 src/
   app/api/telegram/route.ts   webhook
+  app/api/health/             ping de uptime
   app/api/cron/briefing/      cron do briefing
   app/api/briefing/scores-image/  PNG de resultados (debug)
   briefing/                   fontes (clima, RSS, ESPN), ordenação, mensagem, imagem, orquestração

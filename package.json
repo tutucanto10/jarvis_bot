@@ -11,6 +11,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "build:render": "tsx scripts/migrate.ts && next build",
+    "start:render": "tsx scripts/set-webhook.ts --on-start; next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

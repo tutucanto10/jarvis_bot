@@ -1,14 +1,20 @@
 /**
- * Usage: pnpm webhook:set [https://seu-app.vercel.app]
- * Falls back to APP_URL from .env when no argument is given.
+ * Usage: pnpm webhook:set [https://seu-app.onrender.com]
+ * URL falls back to APP_URL, then RENDER_EXTERNAL_URL (set automatically by Render).
+ *
+ * --on-start: used by the Render start command — keeps updates queued during the deploy
+ * and never fails, so a Telegram hiccup can't stop the server from booting.
  */
 import { Api } from "grammy";
 import { getTelegramEnv } from "../src/lib/env";
 
+const args = process.argv.slice(2);
+const onStart = args.includes("--on-start");
+
 async function main(): Promise<void> {
   const env = getTelegramEnv();
-  const baseUrl = process.argv[2] ?? process.env.APP_URL;
-  if (!baseUrl) throw new Error("Passe a URL: pnpm webhook:set https://seu-app.vercel.app (ou defina APP_URL)");
+  const baseUrl = args.find((a) => !a.startsWith("--")) ?? process.env.APP_URL ?? process.env.RENDER_EXTERNAL_URL;
+  if (!baseUrl) throw new Error("Passe a URL: pnpm webhook:set https://seu-app.onrender.com (ou defina APP_URL)");
 
   const url = new URL("/api/telegram", baseUrl);
   if (url.protocol !== "https:") throw new Error("O Telegram exige HTTPS no webhook");
@@ -17,7 +23,7 @@ async function main(): Promise<void> {
   await api.setWebhook(url.toString(), {
     secret_token: env.TELEGRAM_WEBHOOK_SECRET,
     allowed_updates: ["message", "callback_query"],
-    drop_pending_updates: true,
+    drop_pending_updates: !onStart,
   });
 
   await api.setMyCommands([
@@ -37,6 +43,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err: unknown) => {
-  console.error("❌", err instanceof Error ? err.message : err);
-  process.exit(1);
+  console.error("❌ webhook:", err instanceof Error ? err.message : err);
+  if (!onStart) process.exit(1);
 });
